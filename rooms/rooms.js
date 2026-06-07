@@ -24,6 +24,7 @@ class Room {
         this.startingPlayerIndex = 0; // 0 = X starts, 1 = O starts; alternates
         this.waitingForNextRound = false;
         this.endMatchProposerId = null;   // tracks who proposed ending the match early
+        this.messages = [];              // chat history (max 100)
     }
 
     addPlayer(player) {
