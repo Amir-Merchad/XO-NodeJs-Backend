@@ -10,6 +10,7 @@ const registerGameHandlers = require("./sockets/gameHandler");
 const registerChatHandlers = require("./sockets/chatHandler");
 const registerSocialHandlers = require("./sockets/socialHandler");
 const getVoiceConfig = require("./services/voiceConfig");
+const PushService = require("./services/pushService");
 
 const PORT = process.env.PORT || 3000;
 
@@ -18,6 +19,7 @@ async function startServer() {
     const roomManager = new RoomManager();
     const playerRegistry = new PlayerRegistry(socialStore);
     const partyManager = new PartyManager(socialStore);
+    const pushService = new PushService();
 
     const app = express();
     const server = http.createServer(app);
@@ -29,10 +31,10 @@ async function startServer() {
     io.on("connection", (socket) => {
         console.log(`[CONNECT] ${socket.id}`);
 
-        registerRoomHandlers(io, socket, roomManager, playerRegistry);
+        registerRoomHandlers(io, socket, roomManager, playerRegistry, partyManager);
         registerGameHandlers(io, socket, roomManager);
         registerChatHandlers(io, socket, roomManager);
-        registerSocialHandlers(io, socket, playerRegistry, partyManager, roomManager);
+        registerSocialHandlers(io, socket, playerRegistry, partyManager, roomManager, pushService);
 
         socket.on('get-voice-config', () => {
             socket.emit('voice-config', getVoiceConfig());
@@ -46,7 +48,16 @@ async function startServer() {
                 if (wasInRoom) {
                     room.removePlayer(socket.id);
                     io.to(roomCode).emit('player-disconnected', { socketId: socket.id });
-                    if (room.players.length === 0) roomManager.removeRoom(roomCode);
+                    if (room.players.length === 0) {
+                        roomManager.removeRoom(roomCode);
+                        if (room.partyCode) {
+                            partyManager.setRoom(room.partyCode, null);
+                            const partyState = partyManager.getState(room.partyCode);
+                            if (partyState) io.to(`party:${room.partyCode}`).emit('party-state', partyState);
+                        }
+                    } else {
+                        io.to(roomCode).emit('room-state', room.getState());
+                    }
                 }
             }
         });

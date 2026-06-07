@@ -9,10 +9,11 @@ The backend stores players, friends, direct messages, and party history in
 PostgreSQL when `DATABASE_URL` exists. Without `DATABASE_URL`, it falls back to a
 local `.data/social-store.json` file for development.
 
-## Voice chat setup
+## Voice and video chat setup
 
-Voice chat needs TURN servers to work reliably across different networks. STUN
-alone may work on the same Wi-Fi, but it will fail for some home/mobile NATs.
+Voice and video chat need TURN servers to work reliably across different
+networks. STUN alone may work on the same Wi-Fi, but it will fail for some
+home/mobile NATs.
 
 Set these Railway variables with credentials from a TURN provider:
 
@@ -30,7 +31,26 @@ VOICE_FORCE_RELAY=true
 ```
 
 Use `VOICE_FORCE_RELAY=true` only when testing TURN, because it forces all voice
-traffic through TURN.
+and video traffic through TURN.
+
+## Push notifications setup
+
+Push notifications use Firebase Cloud Messaging. The backend stays runnable
+without Firebase credentials, but push notifications only send after you set one
+of these Railway variables:
+
+```bash
+FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+```
+
+or:
+
+```bash
+FIREBASE_SERVICE_ACCOUNT_BASE64=base64-encoded-service-account-json
+```
+
+The JSON comes from Firebase Console -> Project settings -> Service accounts ->
+Generate new private key. Keep it private and never put it in the Flutter app.
 
 Install dependencies before pushing if you are working locally:
 

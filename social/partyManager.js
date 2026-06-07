@@ -177,7 +177,7 @@ class PartyManager {
         return message;
     }
 
-    setVoiceState(partyCode, playerCode, active, muted) {
+    setVoiceState(partyCode, playerCode, active, muted, videoEnabled = false) {
         const party = this.getParty(partyCode);
         const code = this._normalizePlayerCode(playerCode);
         if (!party) return null;
@@ -189,11 +189,12 @@ class PartyManager {
                 playerCode: code,
                 active: true,
                 muted: !!muted,
+                videoEnabled: !!videoEnabled,
                 updatedAt: Date.now(),
             };
         }
 
-        return party.voiceStates[code] || { playerCode: code, active: false, muted: false };
+        return party.voiceStates[code] || { playerCode: code, active: false, muted: false, videoEnabled: false };
     }
 
     setRoom(partyCode, roomCode) {

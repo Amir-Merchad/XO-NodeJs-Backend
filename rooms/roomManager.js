@@ -26,11 +26,13 @@ class RoomManager {
     }
 
     getRoom(roomCode) {
-        return this.rooms[roomCode];
+        const code = String(roomCode || '').trim().toUpperCase();
+        return this.rooms[code];
     }
 
     removeRoom(roomCode) {
-        delete this.rooms[roomCode];
+        const code = String(roomCode || '').trim().toUpperCase();
+        delete this.rooms[code];
     }
 }
 

@@ -6,6 +6,10 @@ function registerGameHandlers(io, socket, roomManager) {
     socket.on('select-game', ({ roomCode, gameType }) => {
         const room = roomManager.getRoom(roomCode);
         if (!room) return;
+        if (room.hostSocketId && socket.id !== room.hostSocketId) {
+            socket.emit('game-selection-error', { message: 'Only the host can choose the game' });
+            return;
+        }
 
         const success = room.lobby.selectGame(gameType);
         if (!success) {
@@ -18,9 +22,24 @@ function registerGameHandlers(io, socket, roomManager) {
     });
 
     // ── Start game (round 1) ─────────────────────────────────────────────────
-    socket.on('start-game', ({ roomCode, targetWins }) => {
+    socket.on('start-game', ({ roomCode, targetWins, gameType }) => {
         const room = roomManager.getRoom(roomCode);
-        if (!room || !room.game) return;
+        if (!room) return;
+        if (room.hostSocketId && socket.id !== room.hostSocketId) {
+            socket.emit('game-start-error', { message: 'Only the host can start the game' });
+            return;
+        }
+        if (room.players.length < 2) {
+            socket.emit('game-start-error', { message: 'Need at least two players' });
+            return;
+        }
+        if (gameType || !room.game) {
+            const success = room.lobby.selectGame(gameType || room.selectedGame || 'xo');
+            if (!success) {
+                socket.emit('game-start-error', { message: 'Unsupported game' });
+                return;
+            }
+        }
 
         room.matchConfig = { targetWins: targetWins || 3 };
         room.currentRound = 1;
@@ -50,7 +69,7 @@ function registerGameHandlers(io, socket, roomManager) {
         if (!room || !room.game) return;
 
         const playerIndex = room.players.findIndex(p => p.socketId === socket.id);
-        if (playerIndex === -1) return;
+        if (playerIndex === -1 || playerIndex > 1) return;
 
         const player = playerIndex === 0 ? 'X' : 'O';
         const success = room.game.makeMove(index, player);

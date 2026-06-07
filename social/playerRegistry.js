@@ -304,6 +304,7 @@ class PlayerRegistry {
             friends: new Set(profile.friends || []),
             incomingFriendRequests: new Set(profile.incomingFriendRequests || []),
             outgoingFriendRequests: new Set(profile.outgoingFriendRequests || []),
+            fcmTokens: new Set(profile.fcmTokens || []),
         };
     }
 
@@ -316,6 +317,7 @@ class PlayerRegistry {
             friends: [],
             incomingFriendRequests: [],
             outgoingFriendRequests: [],
+            fcmTokens: [],
             createdAt: Date.now(),
             lastSeen: Date.now(),
         };
@@ -329,7 +331,30 @@ class PlayerRegistry {
         profile.friends = Array.from(player.friends);
         profile.incomingFriendRequests = Array.from(player.incomingFriendRequests);
         profile.outgoingFriendRequests = Array.from(player.outgoingFriendRequests);
+        profile.fcmTokens = Array.from(player.fcmTokens || []);
         profile.lastSeen = Date.now();
+    }
+
+    updatePushToken(player, token) {
+        const value = this._sanitizePushToken(token);
+        if (!player || !value) return false;
+
+        player.fcmTokens = player.fcmTokens || new Set();
+        player.fcmTokens.add(value);
+        this._syncPlayerToProfile(player);
+        this._save();
+        return true;
+    }
+
+    removePushToken(player, token) {
+        const value = this._sanitizePushToken(token);
+        if (!player || !value) return false;
+
+        player.fcmTokens = player.fcmTokens || new Set();
+        player.fcmTokens.delete(value);
+        this._syncPlayerToProfile(player);
+        this._save();
+        return true;
     }
 
     _profileSet(profile, key) {
@@ -370,6 +395,10 @@ class PlayerRegistry {
 
     _sanitizeToken(token) {
         return String(token || '').trim().substring(0, 80);
+    }
+
+    _sanitizePushToken(token) {
+        return String(token || '').trim().substring(0, 512);
     }
 
     _save() {

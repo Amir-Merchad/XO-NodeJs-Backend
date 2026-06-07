@@ -17,6 +17,7 @@ class Room {
         this.lobby = new Lobby(this);
 
         this.hostSocketId = null;
+        this.partyCode = null;
 
         // ── Match state ──────────────────────────────
         this.matchConfig = { targetWins: 3 };
@@ -45,11 +46,20 @@ class Room {
     }
 
     removePlayer(socketId) {
-        this.players =
-            this.players.filter(
-                player =>
-                    player.socketId !== socketId
-            );
+        const before = this.players.length;
+        this.players = this.players.filter(
+            player => player.socketId !== socketId
+        );
+
+        if (this.hostSocketId === socketId) {
+            this.hostSocketId = this.players[0]?.socketId || null;
+        }
+
+        if (this.players.length < 2 && this.state !== 'waiting') {
+            this.state = 'waiting';
+        }
+
+        return this.players.length !== before;
     }
 
     isFull() {
@@ -76,6 +86,9 @@ class Room {
             roomCode:     this.roomCode,
             state:        this.state,
             players:      this.players,   // includes { socketId, nickname }
+            maxPlayers:   this.maxPlayers,
+            hostSocketId: this.hostSocketId,
+            partyCode:    this.partyCode,
             selectedGame: this.selectedGame,
             matchConfig:  this.matchConfig,
             scores:       this.scores,

@@ -1,4 +1,4 @@
-function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomManager) {
+function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomManager, pushService) {
     socket.on('register-player', ({ nickname, clientId, playerCode } = {}) => {
         const player = playerRegistry.register(socket.id, nickname, clientId, playerCode);
         const restoredParty = partyManager.attachMember(player);
@@ -19,6 +19,18 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
     socket.on('get-friends', () => {
         const player = getMe();
         if (player) emitFriends(player);
+    });
+
+    socket.on('register-push-token', ({ token } = {}) => {
+        const player = getMe();
+        if (!player) return;
+        playerRegistry.updatePushToken(player, token);
+    });
+
+    socket.on('remove-push-token', ({ token } = {}) => {
+        const player = getMe();
+        if (!player) return;
+        playerRegistry.removePushToken(player, token);
     });
 
     socket.on('send-friend-request', ({ playerCode } = {}) => {
@@ -54,6 +66,12 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
                 isOnline: true,
             });
             emitSocialState(result.target);
+        } else {
+            sendPush(result.targetProfile, {
+                title: 'Friend request',
+                body: `${sender.nickname} added you`,
+                data: { type: 'friend_request', fromPlayerCode: sender.playerCode },
+            });
         }
 
         emitSocialState(sender);
@@ -128,7 +146,15 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
         if (!message) return;
 
         socket.emit('dm-sent', message);
-        if (target) io.to(target.socketId).emit('dm-received', message);
+        if (target) {
+            io.to(target.socketId).emit('dm-received', message);
+        } else {
+            sendPush(targetProfile, {
+                title: sender.nickname,
+                body: value.substring(0, 120),
+                data: { type: 'direct_message', fromPlayerCode: sender.playerCode },
+            });
+        }
     });
 
     socket.on('create-party', ({ partyName } = {}) => {
@@ -197,6 +223,12 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
                 fromNickname: sender.nickname,
             });
             emitSocialState(target);
+        } else {
+            sendPush(targetProfile, {
+                title: 'Party invite',
+                body: `${sender.nickname} invited you to ${party.name}`,
+                data: { type: 'party_invite', partyCode: party.partyCode, fromPlayerCode: sender.playerCode },
+            });
         }
         emitPartyState(party.partyCode);
     });
@@ -279,15 +311,26 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
 
         for (const code of limitedInvites) {
             const target = playerRegistry.getByCode(code);
-            if (!target) continue;
+            const targetProfile = playerRegistry.getProfile(code);
+            if (!targetProfile) continue;
 
-            io.to(target.socketId).emit('room-invite-received', {
+            const invite = {
                 roomCode: room.roomCode,
                 partyCode: party.partyCode,
                 fromPlayerCode: creator.playerCode,
                 fromNickname: creator.nickname,
                 playerCount: room.maxPlayers,
-            });
+            };
+
+            if (target) {
+                io.to(target.socketId).emit('room-invite-received', invite);
+            } else {
+                sendPush(targetProfile, {
+                    title: 'Room invite',
+                    body: `${creator.nickname} opened room ${room.roomCode}`,
+                    data: { type: 'room_invite', roomCode: room.roomCode, partyCode: party.partyCode },
+                });
+            }
         }
 
         io.to(partyRoom(party.partyCode)).emit('party-room-created', {
@@ -301,19 +344,20 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
         emitPartyState(party.partyCode);
     });
 
-    socket.on('party-voice-peer-state', ({ partyCode, active, muted } = {}) => {
+    socket.on('party-voice-peer-state', ({ partyCode, active, muted, videoEnabled } = {}) => {
         const sender = getMe();
         const party = partyManager.getParty(partyCode);
 
         if (!sender || !party || !partyManager.isMember(party.partyCode, sender.playerCode)) return;
 
-        const state = partyManager.setVoiceState(party.partyCode, sender.playerCode, !!active, !!muted);
+        const state = partyManager.setVoiceState(party.partyCode, sender.playerCode, !!active, !!muted, !!videoEnabled);
         socket.to(partyRoom(party.partyCode)).emit('party-voice-peer-state', {
             partyCode: party.partyCode,
             fromPlayerCode: sender.playerCode,
             fromNickname: sender.nickname,
             active: state.active,
             muted: state.muted,
+            videoEnabled: state.videoEnabled,
         });
         emitPartyState(party.partyCode);
     });
@@ -486,6 +530,13 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
             fromPlayerCode: sender.playerCode,
             fromNickname: sender.nickname,
             ...payload,
+        });
+    }
+
+    function sendPush(profile, payload) {
+        if (!pushService || !profile) return;
+        pushService.sendToProfile(profile, payload).catch((error) => {
+            console.error('[PUSH] Notification failed:', error.message);
         });
     }
 }
