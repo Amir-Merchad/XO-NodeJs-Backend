@@ -37,6 +37,7 @@ io.on("connection", (socket) => {
 
         socket.emit("room-created", {
             roomCode,
+            playerCount,
         });
     });
 
