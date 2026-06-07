@@ -1,68 +1,55 @@
-function registerGameHandlers(io, socket, roomManager) {
-    socket.on("select-game", ({ roomCode, gameType }) => {
-        const room = roomManager.getRoom(roomCode);
+const XOGame = require('../games/xo/xoGame');
 
-        if (!room) {
-            return;
-        }
+function registerGameHandlers(io, socket, roomManager) {
+
+    // ── Select game ──────────────────────────────────────────────────────────
+    socket.on('select-game', ({ roomCode, gameType }) => {
+        const room = roomManager.getRoom(roomCode);
+        if (!room) return;
 
         const success = room.lobby.selectGame(gameType);
-
         if (!success) {
-            socket.emit(
-                "game-selection-error",
-                {
-                    message: "Unsupported game"
-                }
-            );
-
+            socket.emit('game-selection-error', { message: 'Unsupported game' });
             return;
         }
 
-        io.to(roomCode).emit(
-            "game-selected",
-            {
-                gameType
-            }
-        );
-
-        io.to(roomCode).emit(
-            "room-state",
-            room.getState()
-        );
+        io.to(roomCode).emit('game-selected', { gameType });
+        io.to(roomCode).emit('room-state', room.getState());
     });
 
-    socket.on(
-        "start-game",
-        ({ roomCode }) => {
-
-            const room = roomManager.getRoom(roomCode);
-
-            if (
-                !room ||
-                !room.game
-            ) {
-                return;
-            }
-
-            room.game.start();
-
-            io.to(roomCode).emit(
-                "game-started",
-                room.game.getState()
-            );
-        }
-    );
-
-    socket.on('make-move', ({ roomCode, index }) => {
+    // ── Start game (round 1) ─────────────────────────────────────────────────
+    socket.on('start-game', ({ roomCode, targetWins }) => {
         const room = roomManager.getRoom(roomCode);
-
         if (!room || !room.game) return;
 
-        const playerIndex = room.players.findIndex(
-            p => p.socketId === socket.id
-        );
+        room.matchConfig = { targetWins: targetWins || 3 };
+        room.currentRound = 1;
+        room.matchOver = false;
+        room.startingPlayerIndex = 0;
+        room.waitingForNextRound = false;
 
+        room.scores = {};
+        room.players.forEach(p => {
+            room.scores[p.socketId] = { wins: 0, draws: 0, losses: 0, points: 0 };
+        });
+
+        room.game.start();
+
+        io.to(roomCode).emit('game-started', {
+            ...room.game.getState(),
+            matchConfig: room.matchConfig,
+            scores: room.scores,
+            round: room.currentRound,
+            players: room.players,
+        });
+    });
+
+    // ── Make move ────────────────────────────────────────────────────────────
+    socket.on('make-move', ({ roomCode, index }) => {
+        const room = roomManager.getRoom(roomCode);
+        if (!room || !room.game) return;
+
+        const playerIndex = room.players.findIndex(p => p.socketId === socket.id);
         if (playerIndex === -1) return;
 
         const player = playerIndex === 0 ? 'X' : 'O';
@@ -76,10 +63,123 @@ function registerGameHandlers(io, socket, roomManager) {
         io.to(roomCode).emit('move-made', room.game.getState());
 
         if (room.game.winner) {
-            io.to(roomCode).emit('game-over', {
-                winner: room.game.winner,
+            const winner = room.game.winner;
+
+            if (winner === 'draw') {
+                room.players.forEach(p => {
+                    if (room.scores[p.socketId]) {
+                        room.scores[p.socketId].draws++;
+                        room.scores[p.socketId].points += 1;
+                    }
+                });
+            } else {
+                const winnerIdx = winner === 'X' ? 0 : 1;
+                const loserIdx  = 1 - winnerIdx;
+                const winnerSid = room.players[winnerIdx]?.socketId;
+                const loserSid  = room.players[loserIdx]?.socketId;
+
+                if (winnerSid && room.scores[winnerSid]) {
+                    room.scores[winnerSid].wins++;
+                    room.scores[winnerSid].points += 3;
+                }
+                if (loserSid && room.scores[loserSid]) {
+                    room.scores[loserSid].losses++;
+                }
+            }
+
+            let matchWinnerId = null;
+            for (const p of room.players) {
+                if ((room.scores[p.socketId]?.wins ?? 0) >= room.matchConfig.targetWins) {
+                    matchWinnerId = p.socketId;
+                    break;
+                }
+            }
+
+            room.matchOver = !!matchWinnerId;
+            room.waitingForNextRound = !room.matchOver;
+
+            io.to(roomCode).emit('round-ended', {
+                roundWinner: winner,
+                scores: room.scores,
+                round: room.currentRound,
+                matchOver: room.matchOver,
+                matchWinnerId,
+                players: room.players,
+                matchConfig: room.matchConfig,
                 board: room.game.board,
             });
+        }
+    });
+
+    // ── Next round ───────────────────────────────────────────────────────────
+    socket.on('next-round', ({ roomCode }) => {
+        const room = roomManager.getRoom(roomCode);
+        if (!room || room.matchOver || !room.waitingForNextRound) return;
+
+        room.waitingForNextRound = false;
+        room.startingPlayerIndex = 1 - room.startingPlayerIndex;
+        room.currentRound++;
+
+        room.game = new XOGame();
+        room.game.currentTurn = room.startingPlayerIndex === 0 ? 'X' : 'O';
+        room.game.start();
+
+        io.to(roomCode).emit('round-started', {
+            ...room.game.getState(),
+            scores: room.scores,
+            round: room.currentRound,
+            matchConfig: room.matchConfig,
+            players: room.players,
+        });
+    });
+
+    // ── Back to lobby ────────────────────────────────────────────────────────
+    socket.on('back-to-lobby', ({ roomCode }) => {
+        const room = roomManager.getRoom(roomCode);
+        if (!room) return;
+
+        room.resetMatch();
+
+        io.to(roomCode).emit('returned-to-lobby', { roomCode });
+        io.to(roomCode).emit('room-state', room.getState());
+    });
+
+    // ── Propose ending the current match early (requires both players) ───────
+    socket.on('propose-end-match', ({ roomCode }) => {
+        const room = roomManager.getRoom(roomCode);
+        if (!room) return;
+
+        const other = room.players.find(p => p.socketId !== socket.id);
+        if (!other) return;
+
+        // Store proposer so the responder can address them
+        room.endMatchProposerId = socket.id;
+
+        io.to(other.socketId).emit('end-match-proposed', {
+            proposerSocketId: socket.id,
+        });
+
+        // Let the proposer know the request was delivered
+        socket.emit('end-match-proposal-sent');
+    });
+
+    // ── Respond to an end-match proposal ─────────────────────────────────────
+    socket.on('respond-end-match', ({ roomCode, accepted }) => {
+        const room = roomManager.getRoom(roomCode);
+        if (!room) return;
+
+        const proposerId = room.endMatchProposerId;
+        room.endMatchProposerId = null;
+
+        if (accepted) {
+            room.resetMatch();
+            io.to(roomCode).emit('returned-to-lobby', { roomCode });
+            io.to(roomCode).emit('room-state', room.getState());
+        } else {
+            // Notify only the proposer
+            if (proposerId) {
+                io.to(proposerId).emit('end-match-declined');
+            }
         }
     });
 }

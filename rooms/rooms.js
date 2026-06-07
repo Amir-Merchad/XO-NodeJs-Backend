@@ -15,9 +15,19 @@ class Room {
         this.state = "waiting";
 
         this.lobby = new Lobby(this);
+
+        // ── Match state ──────────────────────────────
+        this.matchConfig = { targetWins: 3 };
+        this.scores = {};          // { socketId: { wins, draws, losses, points } }
+        this.currentRound = 0;
+        this.matchOver = false;
+        this.startingPlayerIndex = 0; // 0 = X starts, 1 = O starts; alternates
+        this.waitingForNextRound = false;
+        this.endMatchProposerId = null;   // tracks who proposed ending the match early
     }
 
     addPlayer(player) {
+
         if (this.isFull()) {
             return false;
         }
@@ -46,22 +56,29 @@ class Room {
         );
     }
 
-    getState() {
-        return {
-            roomCode:
-            this.roomCode,
-
-            state:
-            this.state,
-
-            players:
-            this.players,
-
-            selectedGame:
-            this.selectedGame,
-        };
+    resetMatch() {
+        this.game = null;
+        this.selectedGame = null;
+        this.matchOver = false;
+        this.currentRound = 0;
+        this.scores = {};
+        this.waitingForNextRound = false;
+        this.startingPlayerIndex = 0;
+        this.endMatchProposerId = null;
+        this.state = this.players.length >= 2 ? 'lobby' : 'waiting';
     }
 
+    getState() {
+        return {
+            roomCode: this.roomCode,
+            state: this.state,
+            players: this.players,
+            selectedGame: this.selectedGame,
+            matchConfig: this.matchConfig,
+            scores: this.scores,
+            currentRound: this.currentRound,
+        };
+    }
 
 }
 
