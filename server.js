@@ -23,7 +23,7 @@ const io = new Server(server, {
 io.on("connection", (socket) => {
     console.log(`[CONNECT] ${socket.id}`);
 
-    registerRoomHandlers(io, socket, roomManager);
+    registerRoomHandlers(io, socket, roomManager, playerRegistry);
     registerGameHandlers(io, socket, roomManager);
     registerChatHandlers(io, socket, roomManager);
     registerSocialHandlers(io, socket, playerRegistry, partyManager, roomManager);

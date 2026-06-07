@@ -16,6 +16,8 @@ class Room {
 
         this.lobby = new Lobby(this);
 
+        this.hostSocketId = null;
+
         // ── Match state ──────────────────────────────
         this.matchConfig = { targetWins: 3 };
         this.scores = {};          // { socketId: { wins, draws, losses, points } }

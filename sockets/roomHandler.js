@@ -1,13 +1,22 @@
 function registerRoomHandlers(
     io,
     socket,
-    roomManager
+    roomManager,
+    playerRegistry
 ) {
     socket.on("create-room", ({ playerCount, nickname }) => {
 
         const room = roomManager.createRoom(playerCount || 2);
+        const registeredPlayer = playerRegistry?.getBySocketId(socket.id);
+        const playerNickname = nickname || registeredPlayer?.nickname || 'Player';
 
-        room.addPlayer({ socketId: socket.id, nickname: nickname || 'Player' });
+        room.hostSocketId = socket.id;
+
+        room.addPlayer({
+            socketId: socket.id,
+            nickname: playerNickname,
+            playerCode: registeredPlayer?.playerCode,
+        });
 
         socket.join(room.roomCode);
 
@@ -22,11 +31,17 @@ function registerRoomHandlers(
             roomManager.getRoom(
                 roomCode
             );
+        const registeredPlayer = playerRegistry?.getBySocketId(socket.id);
+        const playerNickname = nickname || registeredPlayer?.nickname || 'Player';
 
         if (!room) { socket.emit("join-room-error", { message: "Room does not exist" }); return; }
         if (room.isFull()) { socket.emit("join-room-error", { message: "Room is full" }); return; }
 
-        room.addPlayer({ socketId: socket.id, nickname: nickname || 'Player' });
+        room.addPlayer({
+            socketId: socket.id,
+            nickname: playerNickname,
+            playerCode: registeredPlayer?.playerCode,
+        });
 
         socket.join(roomCode);
 
@@ -44,6 +59,9 @@ function registerRoomHandlers(
     socket.on('close-room', ({ roomCode }) => {
         const room = roomManager.getRoom(roomCode);
         if (!room) return;
+        if (socket.id !== room.hostSocketId) {
+            return;
+        }
         io.to(roomCode).emit('room-closed', { roomCode });
         const socketsInRoom = io.sockets.adapter.rooms.get(roomCode);
         if (socketsInRoom) {
