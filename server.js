@@ -47,7 +47,7 @@ io.on("connection", (socket) => {
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-    res.send("Game Backend Running 🚀");
+    res.send("Game Backend Running 🚀1");
 });
 
 server.listen(PORT, () => {
