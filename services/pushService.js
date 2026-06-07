@@ -16,6 +16,7 @@ class PushService {
         const message = {
             tokens,
             notification: {
+                type: "chat_message",
                 title: String(payload.title || 'Gaming Platform').substring(0, 100),
                 body: String(payload.body || '').substring(0, 240),
             },
