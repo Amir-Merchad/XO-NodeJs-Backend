@@ -1,7 +1,11 @@
-const express = require("express");
-const http = require("http");
 const { Server } = require("socket.io");
-const rooms = {};
+const http = require("http");
+const express = require("express");
+const RoomManager = require("./rooms/roomManager");
+const registerRoomHandlers = require("./sockets/roomHandler");
+const registerGameHandlers = require("./sockets/gameHandler");
+
+const roomManager = new RoomManager();
 
 const app = express();
 
@@ -23,62 +27,17 @@ function generateRoomCode() {
 io.on("connection", (socket) => {
     console.log(`[CONNECT] ${socket.id}`);
 
-    socket.on("create-room", ({ playerCount }) => {
-        const roomCode = generateRoomCode();
+    registerRoomHandlers(
+        io,
+        socket,
+        roomManager
+    );
 
-        rooms[roomCode] = {
-            players: [socket.id],
-            playerCount: playerCount,
-        };
-
-        socket.join(roomCode);
-
-        console.log(`Room created: ${roomCode}`);
-
-        socket.emit("room-created", {
-            roomCode,
-            playerCount,
-        });
-    });
-
-    socket.on("join-room", ({ roomCode }) => {
-        const room = rooms[roomCode];
-
-        if (!room) {
-            socket.emit("join-room-error", {
-                message: "Room does not exist",
-            });
-            return;
-        }
-
-        if (room.players.length >= room.playerCount) {
-            socket.emit("join-room-error", {
-                message: "Room is full",
-            });
-            return;
-        }
-
-        room.players.push(socket.id);
-
-        socket.join(roomCode);
-
-        console.log(
-            `Player joined room ${roomCode}`
-        );
-
-        io.to(roomCode).emit("player-joined", {
-            roomCode,
-            playerCount: room.players.length,
-        });
-    });
-
-    socket.on("hello", (message) => {
-        console.log(`[HELLO] ${socket.id}: ${message}`);
-
-        socket.emit("hello-response", {
-            message: "Hello from Node.js!",
-        });
-    });
+    registerGameHandlers(
+        io,
+        socket,
+        roomManager
+    );
 
     socket.on("disconnect", () => {
         console.log(`[DISCONNECT] ${socket.id}`);
@@ -88,7 +47,7 @@ io.on("connection", (socket) => {
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-    res.send("XO Backend Running 🚀");
+    res.send("Game Backend Running 🚀");
 });
 
 server.listen(PORT, () => {
