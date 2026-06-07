@@ -13,11 +13,10 @@ const io = new Server(server, {
 });
 
 io.on("connection", (socket) => {
-    console.log("Client connected:", socket.id);
-    console.log("Client IP:", socket.handshake.address);
+    console.log(`[CONNECT] ${socket.id}`);
 
     socket.on("hello", (message) => {
-        console.log("Received:", message);
+        console.log(`[HELLO] ${socket.id}: ${message}`);
 
         socket.emit("hello-response", {
             message: "Hello from Node.js!",
@@ -25,10 +24,16 @@ io.on("connection", (socket) => {
     });
 
     socket.on("disconnect", () => {
-        console.log("Client disconnected");
+        console.log(`[DISCONNECT] ${socket.id}`);
     });
 });
 
-server.listen(3000, () => {
-    console.log("Server running on port 3000");
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+    res.send("XO Backend Running 🚀");
+});
+
+server.listen(PORT, () => {
+    console.log(`Server running on ${PORT}`);
 });
