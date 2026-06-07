@@ -1,6 +1,16 @@
 class PartyManager {
-    constructor() {
-        this.parties = {};
+    constructor(store) {
+        this.store = store;
+        this.parties = store?.getState().parties || {};
+
+        for (const party of Object.values(this.parties)) {
+            party.members = (party.members || []).map((member) => ({ ...member, socketId: null }));
+            party.invitedCodes = new Set(party.invitedCodes || []);
+            party.messages = party.messages || [];
+            party.voiceStates = {};
+            party.roomCode = null;
+        }
+        this._save();
     }
 
     createParty(hostSocketId, hostNickname, hostCode, partyName) {
@@ -8,17 +18,20 @@ class PartyManager {
         const host = this._member(hostSocketId, hostNickname, hostCode);
         const party = {
             partyCode,
-            name: this._sanitizeName(partyName) || `${hostNickname}'s Party`,
-            hostCode,
+            name: this._sanitizeName(partyName) || `${host.nickname}'s Party`,
+            hostCode: host.playerCode,
             members: [host],
             invitedCodes: new Set(),
             messages: [],
             voiceStates: {},
             roomCode: null,
             maxSize: 10,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
         };
 
         this.parties[partyCode] = party;
+        this._save();
         return party;
     }
 
@@ -45,6 +58,8 @@ class PartyManager {
         const party = this.getParty(partyCode);
         if (!party) return false;
         party.invitedCodes.add(this._normalizePlayerCode(playerCode));
+        party.updatedAt = Date.now();
+        this._save();
         return true;
     }
 
@@ -58,27 +73,60 @@ class PartyManager {
         if (existing) {
             existing.socketId = normalized.socketId;
             existing.nickname = normalized.nickname;
+            existing.lastSeen = Date.now();
+            party.updatedAt = Date.now();
+            this._save();
             return { ok: true, party };
         }
 
         party.members.push(normalized);
         party.invitedCodes.delete(normalized.playerCode);
+        party.updatedAt = Date.now();
+        this._save();
         return { ok: true, party };
     }
 
-    removeMember(partyCode, socketId) {
+    attachMember(player) {
+        const party = this.getPartyByMemberCode(player.playerCode);
+        if (!party) return null;
+
+        const member = party.members.find((item) => item.playerCode === player.playerCode);
+        member.socketId = player.socketId;
+        member.nickname = player.nickname;
+        member.lastSeen = Date.now();
+        party.updatedAt = Date.now();
+        this._save();
+        return party;
+    }
+
+    disconnectMember(socketId) {
+        const party = this.getPartyByMember(socketId);
+        if (!party) return null;
+
+        const member = party.members.find((item) => item.socketId === socketId);
+        if (!member) return null;
+
+        member.socketId = null;
+        member.lastSeen = Date.now();
+        delete party.voiceStates[member.playerCode];
+        party.updatedAt = Date.now();
+        this._save();
+        return party;
+    }
+
+    removeMember(partyCode, socketIdOrPlayerCode) {
         const party = this.getParty(partyCode);
         if (!party) return null;
 
-        const leaving = party.members.find((member) => member.socketId === socketId);
-        party.members = party.members.filter((member) => member.socketId !== socketId);
+        const code = this._normalizePlayerCode(socketIdOrPlayerCode);
+        const leaving = party.members.find((member) => member.socketId === socketIdOrPlayerCode || member.playerCode === code);
+        party.members = party.members.filter((member) => member.socketId !== socketIdOrPlayerCode && member.playerCode !== code);
 
-        if (leaving) {
-            delete party.voiceStates[leaving.playerCode];
-        }
+        if (leaving) delete party.voiceStates[leaving.playerCode];
 
         if (party.members.length === 0) {
             delete this.parties[party.partyCode];
+            this._save();
             return null;
         }
 
@@ -86,18 +134,25 @@ class PartyManager {
             party.hostCode = party.members[0].playerCode;
         }
 
+        party.updatedAt = Date.now();
+        this._save();
         return party;
     }
 
     removeParty(partyCode) {
         const party = this.getParty(partyCode);
-        if (party) delete this.parties[party.partyCode];
+        if (party) {
+            delete this.parties[party.partyCode];
+            this._save();
+        }
     }
 
     renameParty(partyCode, name) {
         const party = this.getParty(partyCode);
         if (!party) return null;
         party.name = this._sanitizeName(name) || party.name;
+        party.updatedAt = Date.now();
+        this._save();
         return party;
     }
 
@@ -117,6 +172,8 @@ class PartyManager {
 
         party.messages.push(message);
         if (party.messages.length > 100) party.messages.shift();
+        party.updatedAt = Date.now();
+        this._save();
         return message;
     }
 
@@ -143,6 +200,8 @@ class PartyManager {
         const party = this.getParty(partyCode);
         if (!party) return null;
         party.roomCode = roomCode;
+        party.updatedAt = Date.now();
+        this._save();
         return party;
     }
 
@@ -172,9 +231,10 @@ class PartyManager {
 
     _member(socketId, nickname, playerCode) {
         return {
-            socketId,
+            socketId: socketId || null,
             nickname: String(nickname || 'Player').trim().substring(0, 18) || 'Player',
             playerCode: this._normalizePlayerCode(playerCode),
+            lastSeen: Date.now(),
         };
     }
 
@@ -188,6 +248,23 @@ class PartyManager {
 
     _normalizePlayerCode(code) {
         return String(code || '').trim().toUpperCase();
+    }
+
+    _save() {
+        if (!this.store) return;
+
+        const serialized = {};
+        for (const [code, party] of Object.entries(this.parties)) {
+            serialized[code] = {
+                ...party,
+                invitedCodes: Array.from(party.invitedCodes || []),
+                voiceStates: {},
+                roomCode: null,
+                members: (party.members || []).map((member) => ({ ...member, socketId: null })),
+            };
+        }
+        this.store.getState().parties = serialized;
+        this.store.save();
     }
 }
 

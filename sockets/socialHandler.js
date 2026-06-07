@@ -1,9 +1,13 @@
 function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomManager) {
-    socket.on('register-player', ({ nickname } = {}) => {
-        const player = playerRegistry.register(socket.id, nickname);
+    socket.on('register-player', ({ nickname, clientId, playerCode } = {}) => {
+        const player = playerRegistry.register(socket.id, nickname, clientId, playerCode);
+        const restoredParty = partyManager.attachMember(player);
+        if (restoredParty) socket.join(partyRoom(restoredParty.partyCode));
 
         socket.emit('player-registered', playerRegistry.toPublicPlayer(player));
+        if (restoredParty) socket.emit('party-state', partyManager.getState(restoredParty.partyCode));
         emitSocialState(player);
+        if (restoredParty) emitPartyState(restoredParty.partyCode);
         notifyFriendsOnline(player);
     });
 
@@ -35,22 +39,24 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
         }
 
         if (result.autoAccepted) {
-            emitFriendAdded(result.receiver, result.sender);
+            emitFriendAdded(result.receiver, result.sender, result.senderProfile);
             return;
         }
 
         socket.emit('friend-request-sent', {
-            playerCode: result.target.playerCode,
-            nickname: result.target.nickname,
+            playerCode: result.targetProfile.playerCode,
+            nickname: result.targetProfile.nickname,
         });
-        io.to(result.target.socketId).emit('friend-request-received', {
-            playerCode: sender.playerCode,
-            nickname: sender.nickname,
-            isOnline: true,
-        });
+        if (result.target) {
+            io.to(result.target.socketId).emit('friend-request-received', {
+                playerCode: sender.playerCode,
+                nickname: sender.nickname,
+                isOnline: true,
+            });
+            emitSocialState(result.target);
+        }
 
         emitSocialState(sender);
-        emitSocialState(result.target);
     }
 
     socket.on('accept-friend-request', ({ senderCode, playerCode } = {}) => {
@@ -62,7 +68,7 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
             return;
         }
 
-        emitFriendAdded(result.receiver, result.sender);
+        emitFriendAdded(result.receiver, result.sender, result.senderProfile);
     });
 
     socket.on('reject-friend-request', ({ senderCode, playerCode } = {}) => {
@@ -105,30 +111,24 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
     socket.on('send-dm', ({ toPlayerCode, text } = {}) => {
         const sender = getMe();
         const target = playerRegistry.getByCode(toPlayerCode);
+        const targetProfile = playerRegistry.getProfile(toPlayerCode);
         const value = String(text || '').trim();
 
         if (!sender || !value) return;
-        if (!target) {
-            socket.emit('dm-error', { message: 'Player is offline' });
+        if (!targetProfile) {
+            socket.emit('dm-error', { message: 'Player not found' });
             return;
         }
-        if (!sender.friends.has(target.playerCode)) {
+        if (!sender.friends.has(targetProfile.playerCode)) {
             socket.emit('dm-error', { message: 'You can only message friends' });
             return;
         }
 
-        const message = {
-            id: `dm-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            fromCode: sender.playerCode,
-            fromNickname: sender.nickname,
-            toCode: target.playerCode,
-            toNickname: target.nickname,
-            text: value.substring(0, 500),
-            timestamp: Date.now(),
-        };
+        const message = playerRegistry.addDirectMessage(sender, targetProfile.playerCode, value);
+        if (!message) return;
 
         socket.emit('dm-sent', message);
-        io.to(target.socketId).emit('dm-received', message);
+        if (target) io.to(target.socketId).emit('dm-received', message);
     });
 
     socket.on('create-party', ({ partyName } = {}) => {
@@ -178,22 +178,26 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
     socket.on('invite-to-party', ({ partyCode, playerCode } = {}) => {
         const sender = getMe();
         const target = playerRegistry.getByCode(playerCode);
+        const targetProfile = playerRegistry.getProfile(playerCode);
         const party = partyManager.getParty(partyCode);
 
-        if (!sender || !target || !party) return;
+        if (!sender || !targetProfile || !party) return;
         if (!partyManager.isMember(party.partyCode, sender.playerCode)) return;
-        if (!sender.friends.has(target.playerCode)) {
+        if (!sender.friends.has(targetProfile.playerCode)) {
             socket.emit('party-error', { message: 'You can only invite friends' });
             return;
         }
 
-        partyManager.addInvitation(party.partyCode, target.playerCode);
-        io.to(target.socketId).emit('party-invite-received', {
-            partyCode: party.partyCode,
-            partyName: party.name,
-            fromPlayerCode: sender.playerCode,
-            fromNickname: sender.nickname,
-        });
+        partyManager.addInvitation(party.partyCode, targetProfile.playerCode);
+        if (target) {
+            io.to(target.socketId).emit('party-invite-received', {
+                partyCode: party.partyCode,
+                partyName: party.name,
+                fromPlayerCode: sender.playerCode,
+                fromNickname: sender.nickname,
+            });
+            emitSocialState(target);
+        }
         emitPartyState(party.partyCode);
     });
 
@@ -343,7 +347,7 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
                 muted: false,
             });
 
-            const remaining = partyManager.removeMember(party.partyCode, socket.id);
+            const remaining = partyManager.disconnectMember(socket.id);
             if (remaining) emitPartyState(party.partyCode);
         }
 
@@ -354,11 +358,11 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
         return playerRegistry.getBySocketId(socket.id);
     }
 
-    function emitFriendAdded(receiver, sender) {
-        io.to(receiver.socketId).emit('friend-added', publicFriend(sender));
-        io.to(sender.socketId).emit('friend-added', publicFriend(receiver));
+    function emitFriendAdded(receiver, sender, senderProfile) {
+        io.to(receiver.socketId).emit('friend-added', publicFriend(sender || senderProfile));
+        if (sender) io.to(sender.socketId).emit('friend-added', publicFriend(receiver));
         emitSocialState(receiver);
-        emitSocialState(sender);
+        if (sender) emitSocialState(sender);
     }
 
     function emitSocialState(player) {
@@ -370,6 +374,8 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
             friends: playerRegistry.getFriends(player),
             incomingFriendRequests: playerRegistry.getIncomingRequests(player),
             outgoingFriendRequests: playerRegistry.getOutgoingRequests(player),
+            dmThreads: buildDmThreads(player),
+            partyInvites: buildPartyInvites(player),
             party: party ? partyManager.getState(party.partyCode) : null,
         });
     }
@@ -378,6 +384,28 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
         io.to(player.socketId).emit('friends-list', {
             friends: playerRegistry.getFriends(player),
         });
+    }
+
+    function buildDmThreads(player) {
+        const threads = {};
+        for (const friendCode of player.friends) {
+            threads[friendCode] = playerRegistry.getDirectMessages(player.playerCode, friendCode);
+        }
+        return threads;
+    }
+
+    function buildPartyInvites(player) {
+        return Object.values(partyManager.parties)
+            .filter((party) => party.invitedCodes?.has(player.playerCode) && !partyManager.isMember(party.partyCode, player.playerCode))
+            .map((party) => {
+                const host = party.members.find((member) => member.playerCode === party.hostCode);
+                return {
+                    partyCode: party.partyCode,
+                    partyName: party.name,
+                    fromPlayerCode: party.hostCode,
+                    fromNickname: host?.nickname || 'Party Host',
+                };
+            });
     }
 
     function emitPartyState(partyCode) {
