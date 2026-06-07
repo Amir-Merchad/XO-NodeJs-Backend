@@ -9,6 +9,7 @@ const registerRoomHandlers = require("./sockets/roomHandler");
 const registerGameHandlers = require("./sockets/gameHandler");
 const registerChatHandlers = require("./sockets/chatHandler");
 const registerSocialHandlers = require("./sockets/socialHandler");
+const getVoiceConfig = require("./services/voiceConfig");
 
 const PORT = process.env.PORT || 3000;
 
@@ -33,6 +34,10 @@ async function startServer() {
         registerChatHandlers(io, socket, roomManager);
         registerSocialHandlers(io, socket, playerRegistry, partyManager, roomManager);
 
+        socket.on('get-voice-config', () => {
+            socket.emit('voice-config', getVoiceConfig());
+        });
+
         socket.on("disconnect", () => {
             console.log(`[DISCONNECT] ${socket.id}`);
             const entries = Object.entries(roomManager.rooms);
@@ -49,6 +54,10 @@ async function startServer() {
 
     app.get("/", (req, res) => {
         res.send("Game Backend Running");
+    });
+
+    app.get("/voice-config", (req, res) => {
+        res.json(getVoiceConfig());
     });
 
     server.listen(PORT, () => {
