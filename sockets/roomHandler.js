@@ -3,100 +3,48 @@ function registerRoomHandlers(
     socket,
     roomManager
 ) {
-    socket.on("create-room", ({ playerCount }) => {
+    socket.on("create-room", ({ playerCount, nickname }) => {
 
-        const room = roomManager.createRoom( playerCount || 2);
+        const room = roomManager.createRoom(playerCount || 2);
 
-        room.addPlayer({
-            socketId: socket.id,
-        });
+        room.addPlayer({ socketId: socket.id, nickname: nickname || 'Player' });
 
         socket.join(room.roomCode);
 
-        socket.emit(
-            "room-created",
-            {
-                roomCode:
-                room.roomCode,
-                playerCount:
-                room.maxPlayers
-            }
-        );
+        socket.emit("room-created", { roomCode: room.roomCode, playerCount: room.maxPlayers });
 
-        io.to(room.roomCode).emit(
-            "room-state",
-            room.getState()
-        );
+        io.to(room.roomCode).emit("room-state", room.getState());
     });
 
-    socket.on("join-room", ({ roomCode }) => {
+    socket.on("join-room", ({ roomCode, nickname }) => {
 
         const room =
             roomManager.getRoom(
                 roomCode
             );
 
-        if (!room) {
-            socket.emit(
-                "join-room-error",
-                {
-                    message:
-                        "Room does not exist"
-                }
-            );
+        if (!room) { socket.emit("join-room-error", { message: "Room does not exist" }); return; }
+        if (room.isFull()) { socket.emit("join-room-error", { message: "Room is full" }); return; }
 
-            return;
-        }
-
-        if (room.isFull()) {
-            socket.emit(
-                "join-room-error",
-                {
-                    message:
-                        "Room is full"
-                }
-            );
-
-            return;
-        }
-
-        room.addPlayer({
-            socketId: socket.id,
-        });
+        room.addPlayer({ socketId: socket.id, nickname: nickname || 'Player' });
 
         socket.join(roomCode);
 
-        io.to(roomCode).emit(
-            "player-joined",
-            {
-                roomCode,
-                playerCount:
-                room.players.length
-            }
-        );
+        io.to(roomCode).emit("player-joined", { roomCode, playerCount: room.players.length });
 
-        io.to(roomCode).emit(
-            "room-state",
-            room.getState()
-        );
-
+        io.to(roomCode).emit("room-state", room.getState());
     });
-    // ── Get current room state (used by lobby on re-mount) ──────────────────
+
     socket.on('get-room-state', ({ roomCode }) => {
         const room = roomManager.getRoom(roomCode);
         if (!room) return;
         socket.emit('room-state', room.getState());
     });
 
-    // ── Close room (any player; removes room and sends everyone home) ────────
     socket.on('close-room', ({ roomCode }) => {
         const room = roomManager.getRoom(roomCode);
         if (!room) return;
-
-        // Notify everyone before removing
         io.to(roomCode).emit('room-closed', { roomCode });
-
-        // Drop all sockets from the Socket.IO room
         const socketsInRoom = io.sockets.adapter.rooms.get(roomCode);
         if (socketsInRoom) {
             socketsInRoom.forEach(sid => {

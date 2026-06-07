@@ -71,12 +71,12 @@ class Room {
 
     getState() {
         return {
-            roomCode: this.roomCode,
-            state: this.state,
-            players: this.players,
+            roomCode:     this.roomCode,
+            state:        this.state,
+            players:      this.players,   // includes { socketId, nickname }
             selectedGame: this.selectedGame,
-            matchConfig: this.matchConfig,
-            scores: this.scores,
+            matchConfig:  this.matchConfig,
+            scores:       this.scores,
             currentRound: this.currentRound,
         };
     }
