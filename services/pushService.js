@@ -77,7 +77,7 @@ class PushService {
                 const parsed = JSON.parse(json);
                 return admin.credential.cert(parsed);
             } catch (error) {
-                console.error('[PUSH] Firebase service account JSON is invalid:', error.message);
+                console.error('[PUSH] Firebase service account JSON is invalid: ', error.message);
                 return null;
             }
         }
