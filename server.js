@@ -75,6 +75,13 @@ async function startServer() {
         res.json(await socialStore.status());
     });
 
+    app.get("/push-status", (req, res) => {
+        res.json({
+            ...pushService.status(),
+            ...playerRegistry.pushTokenStats(),
+        });
+    });
+
     async function shutdown(signal) {
         console.log(`[SHUTDOWN] ${signal}: flushing social store`);
         try {

@@ -2,6 +2,8 @@ class PushService {
     constructor() {
         this.enabled = false;
         this.messaging = null;
+        this.credentialSource = null;
+        this.initError = null;
         this._init();
     }
 
@@ -31,11 +33,15 @@ class PushService {
         try {
             const response = await this.messaging.sendEachForMulticast(message);
             if (response.failureCount > 0) {
-                console.warn(`[PUSH] ${response.failureCount}/${tokens.length} notifications failed`);
+                const failures = response.responses
+                    .map((item, index) => ({ item, token: tokens[index] }))
+                    .filter(({ item }) => !item.success);
+                const codes = Array.from(new Set(failures.map(({ item }) => item.error?.code || 'unknown')));
+                console.warn(`[PUSH] ${response.failureCount}/${tokens.length} notifications failed: ${codes.join(', ')}`);
             }
             return response.responses
                 .map((item, index) => ({ item, token: tokens[index] }))
-                .filter(({ item }) => !item.success)
+                .filter(({ item }) => !item.success && isInvalidTokenError(item.error))
                 .map(({ token }) => token);
         } catch (error) {
             console.error('[PUSH] Send failed:', error.message);
@@ -43,11 +49,21 @@ class PushService {
         }
     }
 
+    status() {
+        return {
+            enabled: this.enabled,
+            firebaseEnvConfigured: hasFirebaseEnv(),
+            credentialSource: this.credentialSource,
+            initError: this.initError,
+        };
+    }
+
     _init() {
         let admin;
         try {
             admin = require('firebase-admin');
         } catch (error) {
+            this.initError = 'firebase-admin is not installed';
             console.warn('[PUSH] firebase-admin is not installed. Push notifications disabled.');
             return;
         }
@@ -59,11 +75,18 @@ class PushService {
         }
 
         if (admin.apps.length === 0) {
-            admin.initializeApp({ credential });
+            try {
+                admin.initializeApp({ credential });
+            } catch (error) {
+                this.initError = error.message;
+                console.error('[PUSH] Firebase initialization failed:', error.message);
+                return;
+            }
         }
 
         this.messaging = admin.messaging();
         this.enabled = true;
+        this.initError = null;
         console.log('[PUSH] Firebase Cloud Messaging enabled');
     }
 
@@ -81,14 +104,20 @@ class PushService {
             try {
                 const json = rawJson || Buffer.from(rawBase64, 'base64').toString('utf8');
                 const parsed = JSON.parse(json);
+                if (typeof parsed.private_key === 'string') {
+                    parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+                }
+                this.credentialSource = rawJson ? 'FIREBASE_SERVICE_ACCOUNT_JSON' : 'FIREBASE_SERVICE_ACCOUNT_BASE64';
                 return admin.credential.cert(parsed);
             } catch (error) {
+                this.initError = error.message;
                 console.error('[PUSH] Firebase service account JSON is invalid: ', error.message);
                 return null;
             }
         }
 
         if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+            this.credentialSource = 'GOOGLE_APPLICATION_CREDENTIALS';
             return admin.credential.applicationDefault();
         }
 
@@ -116,6 +145,20 @@ function cleanEnvValue(value, keyName) {
     } catch (_) {
         return text.substring(1, text.length - 1).trim();
     }
+}
+
+function hasFirebaseEnv() {
+    return !!(
+        cleanEnvValue(process.env.FIREBASE_SERVICE_ACCOUNT_JSON, 'FIREBASE_SERVICE_ACCOUNT_JSON') ||
+        cleanEnvValue(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, 'FIREBASE_SERVICE_ACCOUNT_BASE64') ||
+        process.env.GOOGLE_APPLICATION_CREDENTIALS
+    );
+}
+
+function isInvalidTokenError(error) {
+    const code = error?.code || '';
+    return code === 'messaging/invalid-registration-token' ||
+        code === 'messaging/registration-token-not-registered';
 }
 
 function stringifyData(data) {

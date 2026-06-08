@@ -357,6 +357,37 @@ class PlayerRegistry {
         return true;
     }
 
+    removePushTokenFromProfile(profileOrCode, token) {
+        const value = this._sanitizePushToken(token);
+        const code = typeof profileOrCode === 'string'
+            ? this._normalizeCode(profileOrCode)
+            : this._normalizeCode(profileOrCode?.playerCode);
+        const profile = this.profiles[code];
+        if (!profile || !value) return false;
+
+        const before = Array.isArray(profile.fcmTokens) ? profile.fcmTokens.length : 0;
+        profile.fcmTokens = (profile.fcmTokens || []).filter((item) => item !== value);
+
+        const online = this.getByCode(code);
+        if (online?.fcmTokens) online.fcmTokens.delete(value);
+
+        if (profile.fcmTokens.length !== before) {
+            this._save();
+            return true;
+        }
+        return false;
+    }
+
+    pushTokenStats() {
+        const profiles = Object.values(this.profiles);
+        const counts = profiles.map((profile) => Array.isArray(profile.fcmTokens) ? profile.fcmTokens.filter(Boolean).length : 0);
+        return {
+            profileCount: profiles.length,
+            profilesWithPushTokens: counts.filter((count) => count > 0).length,
+            pushTokenCount: counts.reduce((total, count) => total + count, 0),
+        };
+    }
+
     _profileSet(profile, key) {
         return new Set(profile?.[key] || []);
     }

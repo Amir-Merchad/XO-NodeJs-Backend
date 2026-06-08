@@ -23,14 +23,27 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
 
     socket.on('register-push-token', ({ token } = {}) => {
         const player = getMe();
-        if (!player) return;
-        playerRegistry.updatePushToken(player, token);
+        if (!player) {
+            socket.emit('push-token-registered', { ok: false, message: 'Player is not registered yet' });
+            return;
+        }
+
+        const ok = playerRegistry.updatePushToken(player, token);
+        socket.emit('push-token-registered', {
+            ok,
+            tokenCount: player.fcmTokens?.size || 0,
+            message: ok ? undefined : 'Invalid push token',
+        });
     });
 
     socket.on('remove-push-token', ({ token } = {}) => {
         const player = getMe();
         if (!player) return;
-        playerRegistry.removePushToken(player, token);
+        const ok = playerRegistry.removePushToken(player, token);
+        socket.emit('push-token-removed', {
+            ok,
+            tokenCount: player.fcmTokens?.size || 0,
+        });
     });
 
     socket.on('send-friend-request', ({ playerCode } = {}) => {
@@ -537,9 +550,16 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
 
     function sendPush(profile, payload) {
         if (!pushService || !profile) return;
-        pushService.sendToProfile(profile, payload).catch((error) => {
-            console.error('[PUSH] Notification failed:', error.message);
-        });
+        pushService.sendToProfile(profile, payload)
+            .then((invalidTokens) => {
+                if (!Array.isArray(invalidTokens) || invalidTokens.length === 0) return;
+                for (const token of invalidTokens) {
+                    playerRegistry.removePushTokenFromProfile(profile, token);
+                }
+            })
+            .catch((error) => {
+                console.error('[PUSH] Notification failed:', error.message);
+            });
     }
 }
 
