@@ -55,9 +55,7 @@ function registerGameHandlers(io, socket, roomManager) {
 
         room.game.start();
 
-        io.to(roomCode).emit('game-started', {
-            ...room.game.getState(),
-            gameType: room.selectedGame,
+        emitGameState(io, room, 'game-started', {
             matchConfig: room.matchConfig,
             scores: room.scores,
             round: room.currentRound,
@@ -66,7 +64,7 @@ function registerGameHandlers(io, socket, roomManager) {
     });
 
     // ── Make move ────────────────────────────────────────────────────────────
-    socket.on('make-move', ({ roomCode, index }) => {
+    socket.on('make-move', ({ roomCode, index, action, value, color } = {}) => {
         const room = roomManager.getRoom(roomCode);
         if (!room || !room.game) return;
 
@@ -74,17 +72,15 @@ function registerGameHandlers(io, socket, roomManager) {
         if (playerIndex === -1 || playerIndex > 1) return;
 
         const player = playerIndex === 0 ? 'X' : 'O';
-        const success = room.game.makeMove(index, player);
+        const move = action ? { action, value, index, color } : index;
+        const success = room.game.makeMove(move, player);
 
         if (!success) {
             socket.emit('move-error', { message: 'Invalid move' });
             return;
         }
 
-        io.to(roomCode).emit('move-made', {
-            ...room.game.getState(),
-            gameType: room.selectedGame,
-        });
+        emitGameState(io, room, 'move-made');
 
         if (room.game.winner) {
             const winner = room.game.winner;
@@ -127,9 +123,7 @@ function registerGameHandlers(io, socket, roomManager) {
             room.matchOver = !!matchWinnerId;
             room.waitingForNextRound = !room.matchOver;
 
-            io.to(roomCode).emit('round-ended', {
-                ...room.game.getState(),
-                gameType: room.selectedGame,
+            emitGameState(io, room, 'round-ended', {
                 roundWinner: winner,
                 scores: room.scores,
                 round: room.currentRound,
@@ -158,9 +152,7 @@ function registerGameHandlers(io, socket, roomManager) {
         room.game.currentTurn = room.startingPlayerIndex === 0 ? 'X' : 'O';
         room.game.start();
 
-        io.to(roomCode).emit('round-started', {
-            ...room.game.getState(),
-            gameType: room.selectedGame,
+        emitGameState(io, room, 'round-started', {
             scores: room.scores,
             round: room.currentRound,
             matchConfig: room.matchConfig,
@@ -229,6 +221,22 @@ function clampTarget(value, fallback, min, max) {
     const number = Number(value);
     if (!Number.isFinite(number)) return fallback;
     return Math.max(min, Math.min(max, Math.floor(number)));
+}
+
+function emitGameState(io, room, eventName, extra = {}) {
+    for (const player of room.players) {
+        const index = room.players.findIndex(p => p.socketId === player.socketId);
+        const symbol = index === 0 ? 'X' : (index === 1 ? 'O' : 'S');
+        const state = typeof room.game.getStateForPlayer === 'function'
+            ? room.game.getStateForPlayer(symbol)
+            : room.game.getState();
+
+        io.to(player.socketId).emit(eventName, {
+            ...state,
+            gameType: room.selectedGame,
+            ...extra,
+        });
+    }
 }
 
 module.exports = registerGameHandlers;

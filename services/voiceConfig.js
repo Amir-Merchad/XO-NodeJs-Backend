@@ -11,10 +11,16 @@ function getVoiceConfig() {
     const forceRelay =
         cleanEnvValue(process.env.VOICE_FORCE_RELAY)
             .toLowerCase() === "true";
+    const disabled =
+        cleanEnvValue(process.env.VOICE_MEDIA_ENABLED)
+            .toLowerCase() === "false";
+    const hasTurn = iceServers.some(hasTurnServer);
 
     const config = {
         iceServers,
         iceTransportPolicy: forceRelay ? "relay" : "all",
+        hasTurn,
+        mediaEnabled: !disabled && hasTurn,
     };
 
     console.log("[VOICE_CONFIG]", JSON.stringify(maskVoiceConfig(config)));
@@ -151,6 +157,12 @@ function maskVoiceConfig(config) {
             };
         }),
     };
+}
+
+function hasTurnServer(server) {
+    if (!server) return false;
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some((url) => String(url || "").startsWith("turn"));
 }
 
 module.exports = getVoiceConfig;

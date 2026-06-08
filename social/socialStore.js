@@ -9,10 +9,11 @@ class SocialStore {
         this.pool = null;
         this.saveTimer = null;
         this.mode = 'file';
+        this.postgresConfig = resolvePostgresConfig();
     }
 
     async init() {
-        if (process.env.DATABASE_URL) {
+        if (this.postgresConfig) {
             await this._initPostgres();
         } else {
             this._loadFile();
@@ -64,7 +65,9 @@ class SocialStore {
 
         return {
             mode: this.mode,
-            databaseUrlConfigured: !!process.env.DATABASE_URL,
+            databaseUrlConfigured: !!connectionStringFromEnv(),
+            postgresConfigKind: this.postgresConfig?.kind || null,
+            postgresEnvConfigured: !!this.postgresConfig,
             databaseReachable,
             profileCount,
             partyCount,
@@ -89,7 +92,7 @@ class SocialStore {
         }
 
         this.pool = new Pool({
-            connectionString: process.env.DATABASE_URL,
+            ...this.postgresConfig.poolOptions,
             ssl: this._postgresSslConfig(),
         });
         this.mode = 'postgres';
@@ -172,6 +175,74 @@ class SocialStore {
             parties: value?.parties || {},
             dmThreads: value?.dmThreads || {},
         };
+    }
+}
+
+function resolvePostgresConfig() {
+    const connectionString = connectionStringFromEnv();
+    if (connectionString) {
+        return {
+            kind: 'connection-string',
+            poolOptions: { connectionString },
+        };
+    }
+
+    const host = cleanEnvValue(process.env.PGHOST || process.env.POSTGRES_HOST);
+    const database = cleanEnvValue(process.env.PGDATABASE || process.env.POSTGRES_DB || process.env.POSTGRES_DATABASE);
+    const user = cleanEnvValue(process.env.PGUSER || process.env.POSTGRES_USER);
+    const password = cleanEnvValue(process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD);
+    const port = Number(cleanEnvValue(process.env.PGPORT || process.env.POSTGRES_PORT) || 5432);
+
+    if (host && database && user && password) {
+        return {
+            kind: 'pg-fields',
+            poolOptions: {
+                host,
+                database,
+                user,
+                password,
+                port: Number.isFinite(port) ? port : 5432,
+            },
+        };
+    }
+
+    return null;
+}
+
+function connectionStringFromEnv() {
+    return (
+        envValue('DATABASE_URL') ||
+        envValue('DATABASE_PRIVATE_URL') ||
+        envValue('POSTGRES_URL') ||
+        envValue('POSTGRESQL_URL') ||
+        envValue('POSTGRES_DATABASE_URL') ||
+        ''
+    );
+}
+
+function envValue(name) {
+    return cleanEnvValue(process.env[name], name);
+}
+
+function cleanEnvValue(value, keyName = '') {
+    let text = String(value || '').trim();
+    if (!text) return '';
+
+    if (keyName && text.startsWith(`${keyName}=`)) {
+        text = text.substring(keyName.length + 1).trim();
+    }
+
+    const quoted =
+        (text.startsWith('"') && text.endsWith('"')) ||
+        (text.startsWith("'") && text.endsWith("'"));
+
+    if (!quoted) return text;
+
+    try {
+        const parsed = JSON.parse(text);
+        return typeof parsed === 'string' ? parsed.trim() : text;
+    } catch (_) {
+        return text.substring(1, text.length - 1).trim();
     }
 }
 
