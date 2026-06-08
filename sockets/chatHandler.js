@@ -10,7 +10,10 @@ function registerChatHandlers(io, socket, roomManager) {
         if (!room) return null;
         const i = room.players.findIndex(p => p.socketId === socket.id);
         if (i === -1) return null;
-        return { symbol: i === 0 ? 'X' : 'O', nickname: room.players[i].nickname || 'Player' };
+        return {
+            symbol: i === 0 ? 'X' : (i === 1 ? 'O' : 'S'),
+            nickname: room.players[i].nickname || 'Player',
+        };
     }
 
     // ── Text chat ─────────────────────────────────────────────────────────────

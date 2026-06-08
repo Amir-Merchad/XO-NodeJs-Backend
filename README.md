@@ -9,6 +9,16 @@ The backend stores players, friends, direct messages, and party history in
 PostgreSQL when `DATABASE_URL` exists. Without `DATABASE_URL`, it falls back to a
 local `.data/social-store.json` file for development.
 
+After deploy, open this URL to confirm Railway is using PostgreSQL:
+
+```text
+https://your-railway-backend-url/social-store-status
+```
+
+You should see `"mode":"postgres"` and `"databaseReachable":true`. The endpoint
+only returns counts and storage status, not player names, friend lists, or chat
+messages.
+
 ## Voice and video chat setup
 
 Voice and video chat need TURN servers to work reliably across different

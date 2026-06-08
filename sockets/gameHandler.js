@@ -1,5 +1,3 @@
-const XOGame = require('../games/xo/xoGame');
-
 function registerGameHandlers(io, socket, roomManager) {
 
     // ── Select game ──────────────────────────────────────────────────────────
@@ -22,7 +20,7 @@ function registerGameHandlers(io, socket, roomManager) {
     });
 
     // ── Start game (round 1) ─────────────────────────────────────────────────
-    socket.on('start-game', ({ roomCode, targetWins, gameType }) => {
+    socket.on('start-game', ({ roomCode, targetWins, targetPoints, gameType }) => {
         const room = roomManager.getRoom(roomCode);
         if (!room) return;
         if (room.hostSocketId && socket.id !== room.hostSocketId) {
@@ -41,7 +39,10 @@ function registerGameHandlers(io, socket, roomManager) {
             }
         }
 
-        room.matchConfig = { targetWins: targetWins || 3 };
+        room.matchConfig = {
+            targetWins: clampTarget(targetWins, 3, 1, 10),
+            targetPoints: clampTarget(targetPoints, 9, 3, 60),
+        };
         room.currentRound = 1;
         room.matchOver = false;
         room.startingPlayerIndex = 0;
@@ -56,6 +57,7 @@ function registerGameHandlers(io, socket, roomManager) {
 
         io.to(roomCode).emit('game-started', {
             ...room.game.getState(),
+            gameType: room.selectedGame,
             matchConfig: room.matchConfig,
             scores: room.scores,
             round: room.currentRound,
@@ -79,7 +81,10 @@ function registerGameHandlers(io, socket, roomManager) {
             return;
         }
 
-        io.to(roomCode).emit('move-made', room.game.getState());
+        io.to(roomCode).emit('move-made', {
+            ...room.game.getState(),
+            gameType: room.selectedGame,
+        });
 
         if (room.game.winner) {
             const winner = room.game.winner;
@@ -107,9 +112,14 @@ function registerGameHandlers(io, socket, roomManager) {
             }
 
             let matchWinnerId = null;
-            for (const p of room.players) {
-                if ((room.scores[p.socketId]?.wins ?? 0) >= room.matchConfig.targetWins) {
+            let matchWinnerReason = null;
+            for (const p of room.players.slice(0, 2)) {
+                const score = room.scores[p.socketId] || {};
+                const wins = score.wins || 0;
+                const points = score.points || 0;
+                if (wins >= room.matchConfig.targetWins || points >= room.matchConfig.targetPoints) {
                     matchWinnerId = p.socketId;
+                    matchWinnerReason = points >= room.matchConfig.targetPoints ? 'points' : 'wins';
                     break;
                 }
             }
@@ -118,14 +128,16 @@ function registerGameHandlers(io, socket, roomManager) {
             room.waitingForNextRound = !room.matchOver;
 
             io.to(roomCode).emit('round-ended', {
+                ...room.game.getState(),
+                gameType: room.selectedGame,
                 roundWinner: winner,
                 scores: room.scores,
                 round: room.currentRound,
                 matchOver: room.matchOver,
                 matchWinnerId,
+                matchWinnerReason,
                 players: room.players,
                 matchConfig: room.matchConfig,
-                board: room.game.board,
             });
         }
     });
@@ -135,16 +147,20 @@ function registerGameHandlers(io, socket, roomManager) {
         const room = roomManager.getRoom(roomCode);
         if (!room || room.matchOver || !room.waitingForNextRound) return;
 
+        const playerIndex = room.players.findIndex(p => p.socketId === socket.id);
+        if (playerIndex === -1 || playerIndex > 1) return;
+
         room.waitingForNextRound = false;
         room.startingPlayerIndex = 1 - room.startingPlayerIndex;
         room.currentRound++;
 
-        room.game = new XOGame();
+        room.lobby.selectGame(room.selectedGame || 'xo');
         room.game.currentTurn = room.startingPlayerIndex === 0 ? 'X' : 'O';
         room.game.start();
 
         io.to(roomCode).emit('round-started', {
             ...room.game.getState(),
+            gameType: room.selectedGame,
             scores: room.scores,
             round: room.currentRound,
             matchConfig: room.matchConfig,
@@ -157,6 +173,9 @@ function registerGameHandlers(io, socket, roomManager) {
         const room = roomManager.getRoom(roomCode);
         if (!room) return;
 
+        const playerIndex = room.players.findIndex(p => p.socketId === socket.id);
+        if (playerIndex === -1 || (playerIndex > 1 && socket.id !== room.hostSocketId)) return;
+
         room.resetMatch();
 
         io.to(roomCode).emit('returned-to-lobby', { roomCode });
@@ -168,7 +187,10 @@ function registerGameHandlers(io, socket, roomManager) {
         const room = roomManager.getRoom(roomCode);
         if (!room) return;
 
-        const other = room.players.find(p => p.socketId !== socket.id);
+        const playerIndex = room.players.findIndex(p => p.socketId === socket.id);
+        if (playerIndex === -1 || playerIndex > 1) return;
+
+        const other = room.players[playerIndex === 0 ? 1 : 0];
         if (!other) return;
 
         // Store proposer so the responder can address them
@@ -201,6 +223,12 @@ function registerGameHandlers(io, socket, roomManager) {
             }
         }
     });
+}
+
+function clampTarget(value, fallback, min, max) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(min, Math.min(max, Math.floor(number)));
 }
 
 module.exports = registerGameHandlers;

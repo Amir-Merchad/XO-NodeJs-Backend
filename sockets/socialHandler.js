@@ -389,6 +389,7 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
                 fromNickname: player.nickname,
                 active: false,
                 muted: false,
+                videoEnabled: false,
             });
 
             const remaining = partyManager.disconnectMember(socket.id);
@@ -480,6 +481,7 @@ function registerSocialHandlers(io, socket, playerRegistry, partyManager, roomMa
             fromNickname: player.nickname,
             active: false,
             muted: false,
+            videoEnabled: false,
         });
 
         const remaining = partyManager.removeMember(party.partyCode, socket.id);

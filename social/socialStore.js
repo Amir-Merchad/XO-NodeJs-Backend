@@ -34,6 +34,44 @@ class SocialStore {
         this._saveFile();
     }
 
+    async flush() {
+        clearTimeout(this.saveTimer);
+        this.saveTimer = null;
+
+        if (this.mode === 'postgres') {
+            await this._savePostgres();
+            return;
+        }
+
+        this._saveFile();
+    }
+
+    async status() {
+        const state = this.getState();
+        const profileCount = Object.keys(state.profiles || {}).length;
+        const partyCount = Object.keys(state.parties || {}).length;
+        const dmThreadCount = Object.keys(state.dmThreads || {}).length;
+        let databaseReachable = false;
+
+        if (this.mode === 'postgres' && this.pool) {
+            try {
+                await this.pool.query('SELECT 1');
+                databaseReachable = true;
+            } catch (error) {
+                console.error('[SOCIAL_STORE] PostgreSQL ping failed:', error.message);
+            }
+        }
+
+        return {
+            mode: this.mode,
+            databaseUrlConfigured: !!process.env.DATABASE_URL,
+            databaseReachable,
+            profileCount,
+            partyCount,
+            dmThreadCount,
+        };
+    }
+
     _emptyState() {
         return {
             profiles: {},

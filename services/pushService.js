@@ -16,7 +16,6 @@ class PushService {
         const message = {
             tokens,
             notification: {
-                type: "chat_message",
                 title: String(payload.title || 'Gaming Platform').substring(0, 100),
                 body: String(payload.body || '').substring(0, 240),
             },
@@ -69,8 +68,14 @@ class PushService {
     }
 
     _credential(admin) {
-        const rawJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-        const rawBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
+        const rawJson = cleanEnvValue(
+            process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+            'FIREBASE_SERVICE_ACCOUNT_JSON'
+        );
+        const rawBase64 = cleanEnvValue(
+            process.env.FIREBASE_SERVICE_ACCOUNT_BASE64,
+            'FIREBASE_SERVICE_ACCOUNT_BASE64'
+        );
 
         if (rawJson || rawBase64) {
             try {
@@ -88,6 +93,28 @@ class PushService {
         }
 
         return null;
+    }
+}
+
+function cleanEnvValue(value, keyName) {
+    let text = String(value || '').trim();
+    if (!text) return '';
+
+    if (keyName && text.startsWith(`${keyName}=`)) {
+        text = text.substring(keyName.length + 1).trim();
+    }
+
+    const quoted =
+        (text.startsWith('"') && text.endsWith('"')) ||
+        (text.startsWith("'") && text.endsWith("'"));
+
+    if (!quoted) return text;
+
+    try {
+        const parsed = JSON.parse(text);
+        return typeof parsed === 'string' ? parsed.trim() : text;
+    } catch (_) {
+        return text.substring(1, text.length - 1).trim();
     }
 }
 

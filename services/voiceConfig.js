@@ -9,7 +9,7 @@ function getVoiceConfig() {
             : defaultIceServers();
 
     const forceRelay =
-        String(process.env.VOICE_FORCE_RELAY || "")
+        cleanEnvValue(process.env.VOICE_FORCE_RELAY)
             .toLowerCase() === "true";
 
     const config = {
@@ -17,16 +17,17 @@ function getVoiceConfig() {
         iceTransportPolicy: forceRelay ? "relay" : "all",
     };
 
-    console.log("[VOICE_CONFIG]", JSON.stringify(config));
+    console.log("[VOICE_CONFIG]", JSON.stringify(maskVoiceConfig(config)));
 
     return config;
 }
 
 function parseJsonIceServers(value) {
-    if (!value) return null;
+    const cleaned = cleanEnvValue(value, "VOICE_ICE_SERVERS");
+    if (!cleaned) return null;
 
     try {
-        const parsed = JSON.parse(value);
+        const parsed = JSON.parse(cleaned);
 
         if (!Array.isArray(parsed)) {
             return null;
@@ -47,22 +48,25 @@ function parseJsonIceServers(value) {
 
 function buildTurnServersFromEnv() {
     const stunUrls = splitList(
-        process.env.STUN_URLS ||
-        process.env.STUN_URL ||
+        envValue("STUN_URLS") ||
+        envValue("STUN_URL") ||
         "stun:stun.l.google.com:19302"
     );
 
     const turnUrls = splitList(
-        process.env.TURN_URLS ||
-        process.env.TURN_URL
+        envValue("TURN_URLS") ||
+        envValue("TURN_URL")
     );
 
     const username =
-        process.env.TURN_USERNAME;
+        cleanEnvValue(process.env.TURN_USERNAME, "TURN_USERNAME");
 
     const credential =
-        process.env.TURN_CREDENTIAL ||
-        process.env.TURN_PASSWORD;
+        cleanEnvValue(
+            process.env.TURN_CREDENTIAL ||
+            process.env.TURN_PASSWORD,
+            process.env.TURN_CREDENTIAL ? "TURN_CREDENTIAL" : "TURN_PASSWORD"
+        );
 
     const servers = [];
 
@@ -103,10 +107,50 @@ function defaultIceServers() {
 }
 
 function splitList(value) {
-    return String(value || "")
+    return cleanEnvValue(value)
         .split(",")
-        .map(item => item.trim())
+        .map(item => cleanEnvValue(item))
         .filter(Boolean);
+}
+
+function envValue(name) {
+    return cleanEnvValue(process.env[name], name);
+}
+
+function cleanEnvValue(value, keyName = "") {
+    let text = String(value || "").trim();
+    if (!text) return "";
+
+    if (keyName && text.startsWith(`${keyName}=`)) {
+        text = text.substring(keyName.length + 1).trim();
+    }
+
+    const quoted =
+        (text.startsWith('"') && text.endsWith('"')) ||
+        (text.startsWith("'") && text.endsWith("'"));
+
+    if (!quoted) return text;
+
+    try {
+        const parsed = JSON.parse(text);
+        return typeof parsed === "string" ? parsed.trim() : text;
+    } catch (_) {
+        return text.substring(1, text.length - 1).trim();
+    }
+}
+
+function maskVoiceConfig(config) {
+    return {
+        ...config,
+        iceServers: config.iceServers.map((server) => {
+            if (!server || !server.credential) return server;
+            return {
+                ...server,
+                username: server.username ? "***" : server.username,
+                credential: "***",
+            };
+        }),
+    };
 }
 
 module.exports = getVoiceConfig;

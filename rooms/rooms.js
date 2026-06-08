@@ -20,7 +20,7 @@ class Room {
         this.partyCode = null;
 
         // ── Match state ──────────────────────────────
-        this.matchConfig = { targetWins: 3 };
+        this.matchConfig = { targetWins: 3, targetPoints: 9 };
         this.scores = {};          // { socketId: { wins, draws, losses, points } }
         this.currentRound = 0;
         this.matchOver = false;

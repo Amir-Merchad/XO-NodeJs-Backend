@@ -71,6 +71,25 @@ async function startServer() {
         res.json(getVoiceConfig());
     });
 
+    app.get("/social-store-status", async (req, res) => {
+        res.json(await socialStore.status());
+    });
+
+    async function shutdown(signal) {
+        console.log(`[SHUTDOWN] ${signal}: flushing social store`);
+        try {
+            await socialStore.flush();
+        } catch (error) {
+            console.error('[SHUTDOWN] Social store flush failed:', error.message);
+        }
+
+        server.close(() => process.exit(0));
+        setTimeout(() => process.exit(0), 5000).unref();
+    }
+
+    process.once('SIGTERM', () => shutdown('SIGTERM'));
+    process.once('SIGINT', () => shutdown('SIGINT'));
+
     server.listen(PORT, () => {
         console.log(`Server running on ${PORT}`);
     });
